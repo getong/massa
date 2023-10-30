@@ -46,6 +46,7 @@ use massa_wallet::Wallet;
 use parking_lot::{Mutex, RwLock};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{debug, info, trace, warn};
 
 /// Used to acquire a lock on the execution context
@@ -391,6 +392,7 @@ impl ExecutionState {
                 "not enough remaining block gas to execute operation".to_string(),
             )
         })?;
+        // println!("new_remaining_block_gas: {}", new_remaining_block_gas);
 
         // get the operation's sender address
         let sender_addr = operation.content_creator_address;
@@ -422,6 +424,7 @@ impl ExecutionState {
         // Call the execution process specific to the operation type.
         let mut execution_result = match &operation.content.op {
             OperationType::ExecuteSC { .. } => {
+                println!("ExecuteSC");
                 self.execute_executesc_op(&operation.content.op, sender_addr)
             }
             OperationType::CallSC { .. } => {
@@ -434,6 +437,7 @@ impl ExecutionState {
                 self.execute_roll_sell_op(&operation.content.op, sender_addr)
             }
             OperationType::Transaction { .. } => {
+                println!("Transaction");
                 self.execute_transaction_op(&operation.content.op, sender_addr)
             }
         };
@@ -945,6 +949,7 @@ impl ExecutionState {
         let context_snapshot;
         let bytecode = {
             let mut context = context_guard!(self);
+
             context_snapshot = context.get_snapshot();
             context.creator_address = None;
             context.creator_min_balance = None;
@@ -1007,6 +1012,7 @@ impl ExecutionState {
             .module_cache
             .write()
             .load_module(&bytecode, message.max_gas)?;
+
         let response = massa_sc_runtime::run_function(
             &*self.execution_interface,
             module,
@@ -1015,6 +1021,7 @@ impl ExecutionState {
             remaining_gas,
             self.config.gas_costs.clone(),
         );
+
         match response {
             Ok(Response { init_gas_cost, .. }) => {
                 self.module_cache
@@ -1057,6 +1064,7 @@ impl ExecutionState {
         exec_target: Option<&(BlockId, ExecutionBlockMetadata)>,
         selector: Box<dyn SelectorController>,
     ) -> ExecutionOutput {
+        let start_time = Instant::now();
         // Create a new execution context for the whole active slot
         let mut execution_context = ExecutionContext::active_slot(
             self.config.clone(),
@@ -1068,11 +1076,13 @@ impl ExecutionState {
             self.mip_store.clone(),
         );
 
+        let async_msg_start_time = Instant::now();
         // Get asynchronous messages to execute
         let messages = execution_context.take_async_batch(
             self.config.max_async_gas,
             self.config.async_msg_cst_gas_cost,
         );
+        let selected_async_msg_count = messages.len();
 
         // Apply the created execution context for slot execution
         *context_guard!(self) = execution_context;
@@ -1081,12 +1091,15 @@ impl ExecutionState {
         // Effects are cancelled on failure and the sender is reimbursed.
         for (opt_bytecode, message) in messages {
             if let Err(err) = self.execute_async_message(message, opt_bytecode) {
-                debug!("failed executing async message: {}", err);
+                // println!("failed executing async message");
             }
         }
+        let async_msg_stop_time = Instant::now();
+        let async_msg_exec_duration =
+            (async_msg_stop_time.duration_since(async_msg_start_time)).as_millis();
 
         let mut block_info: Option<ExecutedBlockInfo> = None;
-
+        let mut op_count = 0usize;
         // Check if there is a block at this slot
         if let Some((block_id, block_metadata)) = exec_target {
             let block_store = block_metadata
@@ -1121,8 +1134,8 @@ impl ExecutionState {
                     })
                     .collect::<Vec<_>>()
             };
-
-            debug!("executing {} operations at slot {}", operations.len(), slot);
+            op_count = operations.len();
+            println!("##gas slot {}", slot);
 
             // gather all available endorsement creators and target blocks
             let endorsement_creators: Vec<Address> = stored_block
@@ -1260,6 +1273,17 @@ impl ExecutionState {
                 );
             }
         }
+
+        let end_time = Instant::now();
+        let slot_duration = end_time.duration_since(start_time);
+        println!(
+            "##gas Slot executed in {} ms: async msg [{} in {} ms], operation [{} in {} ms]",
+            slot_duration.as_millis(),
+            selected_async_msg_count,
+            async_msg_exec_duration,
+            op_count,
+            end_time.duration_since(async_msg_stop_time).as_millis()
+        );
 
         // Return the execution output
         exec_out
