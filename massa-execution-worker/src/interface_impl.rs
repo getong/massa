@@ -1055,6 +1055,7 @@ impl Interface for InterfaceImpl {
     ///
     /// [DeprecatedByNewRuntime] Replaced by `get_current_slot`
     fn generate_event(&self, data: String) -> Result<()> {
+        println!("generate_event: {}", data);
         if data.len() > self.config.max_event_size {
             bail!("Event data size is too large");
         };

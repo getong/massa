@@ -418,9 +418,11 @@ impl ExecutionState {
         // Call the execution process specific to the operation type.
         let mut execution_result = match &operation.content.op {
             OperationType::ExecuteSC { .. } => {
+                println!("ExecuteSC");
                 self.execute_executesc_op(&operation.content.op, sender_addr)
             }
             OperationType::CallSC { .. } => {
+                println!("CallSC");
                 self.execute_callsc_op(&operation.content.op, sender_addr)
             }
             OperationType::RollBuy { .. } => {
@@ -430,6 +432,7 @@ impl ExecutionState {
                 self.execute_roll_sell_op(&operation.content.op, sender_addr)
             }
             OperationType::Transaction { .. } => {
+                println!("Transaction");
                 self.execute_transaction_op(&operation.content.op, sender_addr)
             }
         };
