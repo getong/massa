@@ -88,7 +88,7 @@ impl ModuleCache {
 
     /// Set the initialization cost of a cached module
     pub fn set_init_cost(&mut self, bytecode: &[u8], init_cost: u64) {
-        warn!("set_init_cost {}", init_cost);
+        // warn!("set_init_cost {}", init_cost);
         let hash = Hash::compute_from(bytecode);
         self.lru_cache.set_init_cost(hash, init_cost);
         self.hd_cache.set_init_cost(hash, init_cost);
@@ -113,7 +113,7 @@ impl ModuleCache {
         }
         let hash = Hash::compute_from(bytecode);
         if let Some(lru_module_info) = self.lru_cache.get(hash) {
-            debug!("load_module: {} present in lru", hash);
+            // debug!("load_module: {} present in lru", hash);
             lru_module_info
         } else if let Some(hd_module_info) = self.hd_cache.get(
             hash,

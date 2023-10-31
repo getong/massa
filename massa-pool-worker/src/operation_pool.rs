@@ -384,7 +384,7 @@ impl OperationPool {
     pub(crate) fn add_operations(&mut self, mut ops_storage: Storage) {
         // List all the new operations
         let mut new_op_ids = ops_storage.get_op_refs() - self.storage.get_op_refs();
-
+        dbg!(&new_op_ids);
         // If there are too many extra operations,
         // we don't want the container to fill up too much in-between refreshes so we drop any excess.
         // This is because refreshing the container is very heavy and is only called periodically.
@@ -454,6 +454,7 @@ impl OperationPool {
     /// - fit inside the block
     /// - is the most profitable for block producer
     pub fn get_block_operations(&self, slot: &Slot) -> (Vec<OperationId>, Storage) {
+        println!("get_block_operations sorted_ops.count {:?}", &self.sorted_ops.len());
         // init list of selected operation IDs
         let mut op_ids = Vec::new();
 
@@ -503,6 +504,7 @@ impl OperationPool {
             // update remaining number of operations
             remaining_ops -= 1;
         }
+        println!("get_block_operations op_ids.count {:?}", &op_ids.len());
 
         // generate storage
         let mut res_storage = self.storage.clone_without_refs();

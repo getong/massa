@@ -41,11 +41,13 @@ use massa_module_cache::config::ModuleCacheConfig;
 use massa_module_cache::controller::ModuleCache;
 use massa_pos_exports::SelectorController;
 use massa_sc_runtime::{Interface, Response, VMError};
+use massa_time::MassaTime;
 use massa_versioning::versioning::MipStore;
 use massa_wallet::Wallet;
 use parking_lot::{Mutex, RwLock};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::SystemTime;
 use tracing::{debug, info, trace, warn};
 
 /// Used to acquire a lock on the execution context
@@ -940,6 +942,7 @@ impl ExecutionState {
         message: AsyncMessage,
         bytecode: Option<Bytecode>,
     ) -> Result<(), ExecutionError> {
+        let execute_async_msg_start = SystemTime::now();
         // prepare execution context
         let context_snapshot;
         let bytecode = {
@@ -1001,12 +1004,16 @@ impl ExecutionState {
             bytecode.0
         };
 
+        let execute_async_msg_get_bytecode = SystemTime::now();
+
         // load and execute the compiled module
         // IMPORTANT: do not keep a lock here as `run_function` uses the `get_module` interface
         let (module, remaining_gas) = self
             .module_cache
             .write()
             .load_module(&bytecode, message.max_gas)?;
+
+        let execute_async_msg_load_module = SystemTime::now();
         let response = massa_sc_runtime::run_function(
             &*self.execution_interface,
             module,
@@ -1014,6 +1021,16 @@ impl ExecutionState {
             &message.function_params,
             remaining_gas,
             self.config.gas_costs.clone(),
+        );
+
+        let execute_async_msg_run_function = SystemTime::now();
+
+        println!(
+            "Async message executed in {} us (get bytecode {} us, load module {} us, run function {} us)",
+            (execute_async_msg_run_function.duration_since(execute_async_msg_start)).unwrap().as_micros(),
+            (execute_async_msg_get_bytecode.duration_since( execute_async_msg_start)).unwrap().as_micros(),
+            (execute_async_msg_load_module.duration_since( execute_async_msg_get_bytecode)).unwrap().as_micros(),
+            (execute_async_msg_run_function.duration_since( execute_async_msg_load_module)).unwrap().as_micros(),
         );
         match response {
             Ok(Response { init_gas_cost, .. }) => {
@@ -1068,8 +1085,10 @@ impl ExecutionState {
             self.mip_store.clone(),
         );
 
+        let async_msg_start_time = MassaTime::now().unwrap();
         // Get asynchronous messages to execute
         let messages = execution_context.take_async_batch(self.config.max_async_gas);
+        let async_msg_select_stop_time = MassaTime::now().unwrap();
         debug!("executing {} messages at slot {}", messages.len(), slot);
 
         // Apply the created execution context for slot execution
@@ -1082,6 +1101,15 @@ impl ExecutionState {
                 debug!("failed executing async message: {}", err);
             }
         }
+        let async_msg_stop_time = MassaTime::now().unwrap();
+        println!(
+            "Async messages executed in {} ms (selection time {} ms, execution time {} ms)",
+            (async_msg_stop_time.to_duration() - async_msg_start_time.to_duration()).as_millis(),
+            (async_msg_select_stop_time.to_duration() - async_msg_start_time.to_duration())
+                .as_millis(),
+            (async_msg_stop_time.to_duration() - async_msg_select_stop_time.to_duration())
+                .as_millis()
+        );
 
         let mut block_info: Option<ExecutedBlockInfo> = None;
 

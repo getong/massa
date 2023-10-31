@@ -190,10 +190,10 @@ impl EndorsementFactoryWorker {
             .expect("could not create endorsement");
 
             // log endorsement creation
-            debug!(
-                "endorsement {} created at slot {} by address {}",
-                endorsement.id, endorsement.content.slot, endorsement.content_creator_address
-            );
+            // debug!(
+            //     "endorsement {} created at slot {} by address {}",
+            //     endorsement.id, endorsement.content.slot, endorsement.content_creator_address
+            // );
 
             endorsements.push(endorsement);
         }
