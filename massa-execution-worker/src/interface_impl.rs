@@ -194,7 +194,7 @@ impl Interface for InterfaceImpl {
         if cfg!(test) {
             println!("SC print: {}", message);
         } else {
-            // debug!("SC print: {}", message);
+            debug!("SC print: {}", message);
         }
         Ok(())
     }
