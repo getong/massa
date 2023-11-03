@@ -47,6 +47,7 @@ use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::SystemTime;
 use tracing::{debug, warn};
 
 /// A snapshot taken from an `ExecutionContext` and that represents its current state.
@@ -176,6 +177,15 @@ pub struct ExecutionContext {
     pub address_factory: AddressFactory,
 }
 
+fn timeit<F: Fn() -> T, T>(f: F, msg: &str) -> T {
+    let start = SystemTime::now();
+    let result = f();
+    let end = SystemTime::now();
+    let duration = end.duration_since(start).unwrap();
+    print!("## {} {} µs,", msg, duration.as_micros());
+    result
+}
+
 impl ExecutionContext {
     /// Create a new empty `ExecutionContext`
     /// This should only be used as a placeholder.
@@ -243,21 +253,53 @@ impl ExecutionContext {
     /// Returns a snapshot containing the clone of the current execution state.
     /// Note that the snapshot does not include slot-level information such as the slot number or block ID.
     pub(crate) fn get_snapshot(&self) -> ExecutionContextSnapshot {
-        let (async_pool_changes, message_infos) = self.speculative_async_pool.get_snapshot();
-        ExecutionContextSnapshot {
-            ledger_changes: self.speculative_ledger.get_snapshot(),
+        let step0_start = SystemTime::now();
+
+        let (async_pool_changes, message_infos) = timeit(
+            || self.speculative_async_pool.get_snapshot(),
+            "snap spec async pool",
+        );
+
+        let async_pool_change_len = async_pool_changes.0.len();
+        let message_infos_len = message_infos.len();
+
+        let ret = ExecutionContextSnapshot {
+            ledger_changes: timeit(
+                || self.speculative_ledger.get_snapshot(),
+                "snap spec ledger",
+            ),
             async_pool_changes,
             message_infos,
-            pos_changes: self.speculative_roll_state.get_snapshot(),
-            executed_ops: self.speculative_executed_ops.get_snapshot(),
-            executed_denunciations: self.speculative_executed_denunciations.get_snapshot(),
+            pos_changes: timeit(
+                || self.speculative_roll_state.get_snapshot(),
+                "snap spec roll state",
+            ),
+            executed_ops: timeit(
+                || self.speculative_executed_ops.get_snapshot(),
+                "snap spec ex ops",
+            ),
+            executed_denunciations: timeit(
+                || self.speculative_executed_denunciations.get_snapshot(),
+                "snap spec ex denun",
+            ),
             created_addr_index: self.created_addr_index,
             created_event_index: self.created_event_index,
             created_message_index: self.created_message_index,
-            stack: self.stack.clone(),
-            events: self.events.clone(),
-            unsafe_rng: self.unsafe_rng.clone(),
-        }
+            stack: timeit(|| self.stack.clone(), "clone stack"),
+            events: timeit(|| self.events.clone(), "clone events"),
+            unsafe_rng: timeit(|| self.unsafe_rng.clone(), "clone rng"),
+        };
+
+        let step2_end = SystemTime::now();
+        let total_duration = step2_end.duration_since(step0_start).unwrap().as_micros();
+        println!("get_snapshot total: {}µs", total_duration,);
+        println!(
+            "async_pool_changes.len: {}, message_infos.len: {}, ledger_changes.len: {}",
+            async_pool_change_len,
+            message_infos_len,
+            ret.ledger_changes.0.len()
+        );
+        ret
     }
 
     /// Resets context to an existing snapshot.

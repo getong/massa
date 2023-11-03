@@ -41,7 +41,6 @@ use massa_module_cache::config::ModuleCacheConfig;
 use massa_module_cache::controller::ModuleCache;
 use massa_pos_exports::SelectorController;
 use massa_sc_runtime::{Interface, Response, VMError};
-use massa_time::MassaTime;
 use massa_versioning::versioning::MipStore;
 use massa_wallet::Wallet;
 use parking_lot::{Mutex, RwLock};
@@ -942,11 +941,16 @@ impl ExecutionState {
         message: AsyncMessage,
         bytecode: Option<Bytecode>,
     ) -> Result<(), ExecutionError> {
-        let execute_async_msg_start = SystemTime::now();
+        let ex_as_msg_step0_start = SystemTime::now();
+        let ex_as_msg_step1_context_guard;
+        let ex_as_msg_step2_before_transfer_coins_beg;
         // prepare execution context
         let context_snapshot;
         let bytecode = {
             let mut context = context_guard!(self);
+
+            ex_as_msg_step1_context_guard = SystemTime::now();
+
             context_snapshot = context.get_snapshot();
             context.max_gas = message.max_gas;
             context.creator_address = None;
@@ -987,6 +991,8 @@ impl ExecutionState {
                 }
             };
 
+            ex_as_msg_step2_before_transfer_coins_beg = SystemTime::now();
+
             // credit coins to the target address
             if let Err(err) =
                 context.transfer_coins(None, Some(message.destination), message.coins, false)
@@ -1004,7 +1010,7 @@ impl ExecutionState {
             bytecode.0
         };
 
-        let execute_async_msg_get_bytecode = SystemTime::now();
+        let ex_as_msg_step2_before_transfer_coins_end = SystemTime::now();
 
         // load and execute the compiled module
         // IMPORTANT: do not keep a lock here as `run_function` uses the `get_module` interface
@@ -1013,7 +1019,7 @@ impl ExecutionState {
             .write()
             .load_module(&bytecode, message.max_gas)?;
 
-        let execute_async_msg_load_module = SystemTime::now();
+        let ex_as_msg_step4_load_module = SystemTime::now();
         let response = massa_sc_runtime::run_function(
             &*self.execution_interface,
             module,
@@ -1023,15 +1029,45 @@ impl ExecutionState {
             self.config.gas_costs.clone(),
         );
 
-        let execute_async_msg_run_function = SystemTime::now();
+        let ex_as_msg_step5_run_function = SystemTime::now();
 
+        let guard_time = ex_as_msg_step1_context_guard
+            .duration_since(ex_as_msg_step0_start)
+            .unwrap()
+            .as_micros();
+        let snapshot_time = ex_as_msg_step2_before_transfer_coins_beg
+            .duration_since(ex_as_msg_step1_context_guard)
+            .unwrap()
+            .as_micros();
+        let transfer_coin_time = ex_as_msg_step2_before_transfer_coins_end
+            .duration_since(ex_as_msg_step2_before_transfer_coins_beg)
+            .unwrap()
+            .as_micros();
+        let load_module_time = ex_as_msg_step4_load_module
+            .duration_since(ex_as_msg_step2_before_transfer_coins_end)
+            .unwrap()
+            .as_micros();
+        let run_function_time = ex_as_msg_step5_run_function
+            .duration_since(ex_as_msg_step4_load_module)
+            .unwrap()
+            .as_micros();
+        let total_time = ex_as_msg_step5_run_function
+            .duration_since(ex_as_msg_step0_start)
+            .unwrap()
+            .as_micros();
+        let sum_time =
+            guard_time + snapshot_time + transfer_coin_time + load_module_time + run_function_time;
         println!(
-            "Async message executed in {} us (get bytecode {} us, load module {} us, run function {} us)",
-            (execute_async_msg_run_function.duration_since(execute_async_msg_start)).unwrap().as_micros(),
-            (execute_async_msg_get_bytecode.duration_since( execute_async_msg_start)).unwrap().as_micros(),
-            (execute_async_msg_load_module.duration_since( execute_async_msg_get_bytecode)).unwrap().as_micros(),
-            (execute_async_msg_run_function.duration_since( execute_async_msg_load_module)).unwrap().as_micros(),
+            "Async message executed in {} us [sum {} us] (guard {} us, snapshot {} us, transfer coin {} us, load module {} us, run function {} us)",
+            total_time,
+            sum_time,
+            guard_time,
+            snapshot_time,
+            transfer_coin_time,
+            load_module_time,
+            run_function_time,
         );
+
         match response {
             Ok(Response { init_gas_cost, .. }) => {
                 self.module_cache
@@ -1085,10 +1121,12 @@ impl ExecutionState {
             self.mip_store.clone(),
         );
 
-        let async_msg_start_time = MassaTime::now().unwrap();
+        let async_msg_start_time = SystemTime::now();
+        let start_time = &async_msg_start_time;
+        print!("## start execute_slot");
         // Get asynchronous messages to execute
         let messages = execution_context.take_async_batch(self.config.max_async_gas);
-        let async_msg_select_stop_time = MassaTime::now().unwrap();
+        let async_msg_select_stop_time = SystemTime::now();
         debug!("executing {} messages at slot {}", messages.len(), slot);
 
         // Apply the created execution context for slot execution
@@ -1101,14 +1139,18 @@ impl ExecutionState {
                 debug!("failed executing async message: {}", err);
             }
         }
-        let async_msg_stop_time = MassaTime::now().unwrap();
+        let async_msg_stop_time = SystemTime::now();
         println!(
-            "Async messages executed in {} ms (selection time {} ms, execution time {} ms)",
-            (async_msg_stop_time.to_duration() - async_msg_start_time.to_duration()).as_millis(),
-            (async_msg_select_stop_time.to_duration() - async_msg_start_time.to_duration())
-                .as_millis(),
-            (async_msg_stop_time.to_duration() - async_msg_select_stop_time.to_duration())
-                .as_millis()
+            "Async messages executed in {} us (selection time {} us, execution time {} us)",
+            (async_msg_stop_time.duration_since(async_msg_start_time))
+                .unwrap()
+                .as_micros(),
+            (async_msg_select_stop_time.duration_since(async_msg_start_time))
+                .unwrap()
+                .as_micros(),
+            (async_msg_stop_time.duration_since(async_msg_select_stop_time))
+                .unwrap()
+                .as_micros()
         );
 
         let mut block_info: Option<ExecutedBlockInfo> = None;
@@ -1148,7 +1190,11 @@ impl ExecutionState {
                     .collect::<Vec<_>>()
             };
 
-            debug!("executing {} operations at slot {}", operations.len(), slot);
+            info!(
+                "##gas: executing {} operations at slot {}",
+                operations.len(),
+                slot
+            );
 
             // gather all available endorsement creators and target blocks
             let endorsement_creators: Vec<Address> = stored_block
@@ -1286,6 +1332,10 @@ impl ExecutionState {
                 );
             }
         }
+        let end_time = SystemTime::now();
+
+        let duration = end_time.duration_since(*start_time).unwrap().as_micros();
+        println!("##gas Slot execution took {} us", duration);
 
         // Return the execution output
         exec_out
