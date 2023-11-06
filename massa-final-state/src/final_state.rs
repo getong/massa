@@ -663,6 +663,7 @@ impl FinalState {
 
         // compute the final state hash
         info!("final_state hash at slot {}: {}", slot, final_state_hash);
+        println!("LEO - finalized execution trail hash at slot {}: : {:?}", slot, self.get_execution_trail_hash());
 
         // Backup DB if needed
         #[cfg(feature = "bootstrap_server")]
