@@ -165,6 +165,13 @@ impl FinalState {
             .get_cf(STATE_CF, EXECUTION_TRAIL_HASH_PREFIX.as_bytes().to_vec())
             .expect("could not read execution trail hash from state DB")
             .expect("could not find execution trail hash in state DB");
+        
+        println!("LEO - GET EXECUTION TRAIL HASH : {:?}", massa_hash::Hash::from_bytes(
+            hash_bytes
+                .as_slice()
+                .try_into()
+                .expect("invalid execution trail hash in state DB"),
+        ));
         massa_hash::Hash::from_bytes(
             hash_bytes
                 .as_slice()
@@ -709,7 +716,10 @@ impl FinalState {
         {
             let execution_trail_hash_serialized =
                 match db.get_cf(STATE_CF, EXECUTION_TRAIL_HASH_PREFIX.as_bytes().to_vec()) {
-                    Ok(Some(v)) => v,
+                    Ok(Some(v)) => {
+                        println!("LEO - EXECUTION_TRAIL_HASH_PREFIX FOUND IN DB : {:?}", v);
+                        v
+                    },
                     Ok(None) => {
                         return Err(anyhow!("No execution trail hash found in DB"));
                     }
@@ -823,6 +833,7 @@ impl FinalState {
 
     /// Initialize the execution trail hash to zero.
     pub fn init_execution_trail_hash_to_batch(&mut self, batch: &mut DBBatch) {
+        println!("LEO - INIT EXECUTION TRAIL HASH TO BATCH");
         batch.insert(
             EXECUTION_TRAIL_HASH_PREFIX.as_bytes().to_vec(),
             Some(massa_hash::Hash::zero().to_bytes().to_vec()),
