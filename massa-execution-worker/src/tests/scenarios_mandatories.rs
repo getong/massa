@@ -1110,6 +1110,7 @@ fn roll_slash() {
     // turn off roll selling on missed block opportunities
     // otherwise balance will be credited with those sold roll (and we need to check the balance for
     // if the deferred credits are reimbursed
+
     let exec_cfg = ExecutionConfig {
         periods_per_cycle: 2,
         thread_count: 2,
@@ -1199,7 +1200,7 @@ fn roll_slash() {
 
     // create a denunciation (that will be ignored as it has been created at the last start period)
     let (_slot, _keypair, s_endorsement_1, s_endorsement_2, _) = gen_endorsements_for_denunciation(
-        Some(Slot::new(exec_cfg.last_start_period, 4)),
+        Some(Slot::new(exec_cfg.last_start_period, 0)),
         Some(keypair.clone()),
     );
     let denunciation_2 = Denunciation::try_from((&s_endorsement_1, &s_endorsement_2)).unwrap();
@@ -1316,7 +1317,7 @@ fn roll_slash_2() {
 
     // create a denunciation (that will be ignored as it has been created at the last start period)
     let (_slot, _keypair, s_endorsement_1, s_endorsement_2, _) = gen_endorsements_for_denunciation(
-        Some(Slot::new(exec_cfg.last_start_period, 4)),
+        Some(Slot::new(exec_cfg.last_start_period, 0)),
         Some(keypair.clone()),
     );
     let denunciation_2 = Denunciation::try_from((&s_endorsement_1, &s_endorsement_2)).unwrap();
