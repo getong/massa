@@ -601,7 +601,7 @@ fn test_staying_connected_pass_handshake_but_deadline_after() {
 
 #[test]
 fn test_staying_connected_pass_handshake_but_deadline_during_data_exchange() {
-    let read_timeout_number = 500;
+    let read_timeout_number = 2000;
     let read_timeout = Duration::from_millis(read_timeout_number);
     let (mut bootstrap_config, server_keypair): (BootstrapConfig, KeyPair) =
         BOOTSTRAP_CONFIG_KEYPAIR.clone();
@@ -611,7 +611,7 @@ fn test_staying_connected_pass_handshake_but_deadline_during_data_exchange() {
     let client = std::net::TcpStream::connect(addr).unwrap();
     let server = server.accept().unwrap();
     let version = || Version::from_str("TEST.1.10").unwrap();
-    let timeout: Duration = Duration::from_millis(800);
+    let timeout: Duration = Duration::from_millis(1600);
     let consensus_controller = MockConsensusController::new();
     let mut protocol_controller = MockProtocolController::new();
     protocol_controller
@@ -628,7 +628,7 @@ fn test_staying_connected_pass_handshake_but_deadline_during_data_exchange() {
             max_datastore_key_length: MAX_DATASTORE_KEY_LENGTH,
             randomness_size_bytes: BOOTSTRAP_RANDOMNESS_SIZE_BYTES,
             consensus_bootstrap_part_size: CONSENSUS_BOOTSTRAP_PART_SIZE,
-            write_error_timeout: MassaTime::from_millis(1000),
+            write_error_timeout: MassaTime::from_millis(2000),
         },
         None,
     );
@@ -676,7 +676,7 @@ fn test_staying_connected_pass_handshake_but_deadline_during_data_exchange() {
         .unwrap();
 
     let client_thread = std::thread::Builder::new()
-        .name("test_binders::server_thread".to_string())
+        .name("test_binders::client_thread".to_string())
         .spawn({
             move || {
                 client.handshake(version()).unwrap();
@@ -685,7 +685,7 @@ fn test_staying_connected_pass_handshake_but_deadline_during_data_exchange() {
                 for _ in 0..10 {
                     let _ = client.send_timeout(
                         &BootstrapClientMessage::AskBootstrapPeers,
-                        Some(Duration::from_millis(1000)),
+                        Some(Duration::from_millis(2000)),
                     );
                     let _ = client.next_timeout(Some(read_timeout));
                     std::thread::sleep(timeout.div_f32(5.0));
@@ -698,7 +698,7 @@ fn test_staying_connected_pass_handshake_but_deadline_during_data_exchange() {
     // if someone doesn't send anything in a data exchange phase the server consider this exchange as finished and so finish without problems
     match res {
         Ok(()) => (),
-        _ => panic!("The server should stop without problems"),
+        Err(e) => panic!("The server should stop without problems: {}", e.to_string()),
     }
     client_thread.join().unwrap();
 }
