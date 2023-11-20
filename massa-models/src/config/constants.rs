@@ -48,42 +48,17 @@ lazy_static::lazy_static! {
     /// Time in milliseconds when the blockclique started.
     /// In sandbox mode, the value depends on starting time and on the --restart-from-snapshot-at-period argument in CLI,
     /// so that the network starts or restarts 10 seconds after launch
-    pub static ref GENESIS_TIMESTAMP: MassaTime = if cfg!(feature = "sandbox") {
-        std::env::var("GENESIS_TIMESTAMP").map(|timestamp| MassaTime::from_millis(timestamp.parse::<u64>().unwrap())).unwrap_or_else(|_|
-            MassaTime::now()
-                .saturating_sub(
-                    T0.checked_mul(get_period_from_args()).unwrap()
-                )
-                .saturating_add(MassaTime::from_millis(1000 * 10)
-            )
-        )
-    } else {
-        MassaTime::from_millis(1700496600000) // Wednesday, November 20, 2023 16:10:00  UTC
-    };
+    pub static ref GENESIS_TIMESTAMP: MassaTime = MassaTime::from_millis(1689847403682);
 
     /// TESTNET: time when the blockclique is ended.
-    pub static ref END_TIMESTAMP: Option<MassaTime> =
-    #[allow(clippy::if_same_then_else)]
-    if cfg!(feature = "sandbox") {
-        None
-    } else {
-        None
-    };
+    pub static ref END_TIMESTAMP: Option<MassaTime> = None;
     /// `KeyPair` to sign genesis blocks.
     pub static ref GENESIS_KEY: KeyPair = KeyPair::from_str("S1UxdCJv5ckDK8z87E5Jq5fEfSVLi2cTHgtpfZy7iURs3KpPns8")
         .unwrap();
     /// number of cycle misses (strictly) above which stakers are deactivated
     pub static ref POS_MISS_RATE_DEACTIVATION_THRESHOLD: Ratio<u64> = Ratio::new(7, 10);
     /// node version
-    pub static ref VERSION: Version = {
-        if cfg!(feature = "sandbox") {
-            "SAND.27.0"
-        } else {
-            "SECU.27.0"
-        }
-        .parse()
-        .unwrap()
-    };
+    pub static ref VERSION: Version = "LABN.7.7".parse().unwrap();
 }
 
 /// Helper function to parse args for lazy_static evaluations
