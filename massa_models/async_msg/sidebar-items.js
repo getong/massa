@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["AsyncMessage","AsyncMessageDeserializer","AsyncMessageSerializer","AsyncMessageTrigger","AsyncMessageTriggerDeserializer","AsyncMessageTriggerSerializer","AsyncMessageUpdate","AsyncMessageUpdateDeserializer","AsyncMessageUpdateSerializer"]};

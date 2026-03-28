@@ -401,6 +401,38 @@
 <a href="#401" id="401">401</a>
 <a href="#402" id="402">402</a>
 <a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2022 MASSA LABS &lt;info@massa.net&gt;
 
 </span><span class="doccomment">//! Build here the default node settings from the configuration file toml
@@ -422,6 +454,11 @@
     <span class="kw">pub </span>level: usize,
 }
 
+<span class="attr">#[derive(Debug, Deserialize, Clone)]
+</span><span class="kw">pub struct </span>CliSettings {
+    <span class="kw">pub </span>approved_community_charter_file_path: PathBuf,
+}
+
 <span class="attr">#[derive(Clone, Debug, Deserialize)]
 </span><span class="kw">pub struct </span>ExecutionSettings {
     <span class="kw">pub </span>max_final_events: usize,
@@ -430,7 +467,6 @@
     <span class="kw">pub </span>stats_time_window_duration: MassaTime,
     <span class="kw">pub </span>max_read_only_gas: u64,
     <span class="kw">pub </span>abi_gas_costs_file: PathBuf,
-    <span class="kw">pub </span>wasm_gas_costs_file: PathBuf,
     <span class="kw">pub </span>hd_cache_path: PathBuf,
     <span class="kw">pub </span>lru_cache_size: u32,
     <span class="kw">pub </span>hd_cache_size: usize,
@@ -440,6 +476,12 @@
     <span class="doccomment">/// slot execution traces channel capacity
     </span><span class="kw">pub </span>broadcast_slot_execution_traces_channel_capacity: usize,
     <span class="kw">pub </span>execution_traces_limit: usize,
+    <span class="kw">pub </span>event_cache_path: PathBuf,
+    <span class="kw">pub </span>event_cache_size: usize,
+    <span class="kw">pub </span>event_snip_amount: usize,
+    <span class="kw">pub </span>max_event_per_query: usize,
+    <span class="doccomment">/// slot execution info channel capacity
+    </span><span class="kw">pub </span>broadcast_slot_execution_info_channel_capacity: usize,
 }
 
 <span class="attr">#[derive(Clone, Debug, Deserialize)]
@@ -491,6 +533,10 @@
     </span><span class="kw">pub </span>staking_wallet_path: PathBuf,
     <span class="doccomment">/// stop the production in case we are not connected to anyone
     </span><span class="kw">pub </span>stop_production_when_zero_connections: bool,
+    <span class="doccomment">/// warn if block production is delayed by more than the given time in milliseconds
+    </span><span class="kw">pub </span>block_delay_warn_threshold: MassaTime,
+    <span class="doccomment">/// timeout for optional channel calls in block production (in milliseconds)
+    </span><span class="kw">pub </span>block_opt_channel_timeout: MassaTime,
 }
 
 <span class="doccomment">/// Pool configuration, read from a file configuration
@@ -501,11 +547,21 @@
     <span class="kw">pub </span>max_operation_pool_excess_items: usize,
     <span class="kw">pub </span>operation_max_future_start_delay: MassaTime,
     <span class="kw">pub </span>operation_pool_refresh_interval: MassaTime,
+    <span class="kw">pub </span>operation_pool_swap_interval: MassaTime,
+    <span class="kw">pub </span>endorsement_pool_swap_interval: MassaTime,
+    <span class="kw">pub </span>denunciation_pool_refresh_interval: MassaTime,
+    <span class="kw">pub </span>denunciation_pool_swap_interval: MassaTime,
     <span class="kw">pub </span>max_endorsements_pool_size_per_thread: usize,
     <span class="kw">pub </span>max_item_return_count: usize,
     <span class="doccomment">/// endorsements channel capacity
-    </span><span class="kw">pub </span>broadcast_endorsements_channel_capacity: usize,
+    </span><span class="kw">pub </span>endorsements_channel_capacity: usize,
     <span class="doccomment">/// operations channel capacity
+    </span><span class="kw">pub </span>operations_channel_capacity: usize,
+    <span class="doccomment">/// denunciations channel capacity
+    </span><span class="kw">pub </span>denunciations_channel_capacity: usize,
+    <span class="doccomment">/// broadcast endorsements channel capacity
+    </span><span class="kw">pub </span>broadcast_endorsements_channel_capacity: usize,
+    <span class="doccomment">/// broadcast operations channel capacity
     </span><span class="kw">pub </span>broadcast_operations_channel_capacity: usize,
     <span class="doccomment">/// operations minimum fees for block creator
     </span><span class="kw">pub </span>minimal_fees: Amount,
@@ -533,6 +589,9 @@
     <span class="comment">// whether to broadcast for blocks, endorsement and operations
     </span><span class="kw">pub </span>enable_broadcast: bool,
     <span class="kw">pub </span>deferred_credits_delta: MassaTime,
+    <span class="kw">pub </span>max_datastore_keys_query: <span class="prelude-ty">Option</span>&lt;u32&gt;,
+    <span class="kw">pub </span>max_addresses_datastore_keys_query: <span class="prelude-ty">Option</span>&lt;u32&gt;,
+    <span class="kw">pub </span>pool_api_timeout: MassaTime,
 }
 
 <span class="attr">#[derive(Debug, Deserialize, Clone)]
@@ -552,6 +611,7 @@
     <span class="kw">pub </span>metrics: MetricsSettings,
     <span class="kw">pub </span>versioning: VersioningSettings,
     <span class="kw">pub </span>block_dump: BlockDumpSettings,
+    <span class="kw">pub </span>cli: CliSettings,
 }
 
 <span class="doccomment">/// Consensus configuration
@@ -773,6 +833,10 @@
     </span><span class="kw">pub </span>client_certificate_path: PathBuf,
     <span class="doccomment">/// client private key path
     </span><span class="kw">pub </span>client_private_key_path: PathBuf,
+    <span class="doccomment">/// Max keys returned by a datastore key query
+    </span><span class="kw">pub </span>max_datastore_keys_query: <span class="prelude-ty">Option</span>&lt;u32&gt;,
+    <span class="doccomment">/// interval for check the connection stream
+    </span><span class="kw">pub </span>unidirectional_stream_interval_check: u64,
 }
 
 <span class="doccomment">/// gRPC API settings.

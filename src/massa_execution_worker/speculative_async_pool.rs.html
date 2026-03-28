@@ -311,32 +311,36 @@
 <a href="#311" id="311">311</a>
 <a href="#312" id="312">312</a>
 <a href="#313" id="313">313</a>
+<a href="#314" id="314">314</a>
+<a href="#315" id="315">315</a>
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
 </pre></div><pre class="rust"><code><span class="comment">// Copyright (c) 2022 MASSA LABS &lt;info@massa.net&gt;
 
 </span><span class="doccomment">//! The speculative asynchronous pool represents the state of
 //! the pool at an arbitrary execution slot.
 
-</span><span class="kw">use </span><span class="kw">crate</span>::active_history::{ActiveHistory, HistorySearchResult::Present};
-<span class="kw">use </span>massa_async_pool::{
-    AsyncMessage, AsyncMessageId, AsyncMessageInfo, AsyncMessageTrigger, AsyncMessageUpdate,
-    AsyncPoolChanges,
-};
+</span><span class="kw">use </span><span class="kw">crate</span>::active_history::ActiveHistory;
+<span class="kw">use </span>massa_async_pool::AsyncPoolChanges;
 <span class="kw">use </span>massa_final_state::FinalStateController;
-<span class="kw">use </span>massa_ledger_exports::{Applicable, LedgerChanges, SetUpdateOrDelete};
+<span class="kw">use </span>massa_ledger_exports::LedgerChanges;
+<span class="kw">use </span>massa_models::async_msg::{AsyncMessage, AsyncMessageTrigger};
+<span class="kw">use </span>massa_models::async_msg_id::AsyncMessageId;
 <span class="kw">use </span>massa_models::slot::Slot;
+<span class="kw">use </span>massa_models::types::{Applicable, SetUpdateOrDelete};
 <span class="kw">use </span>parking_lot::RwLock;
-<span class="kw">use </span>std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+<span class="kw">use </span>std::{collections::BTreeMap, sync::Arc};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>SpeculativeAsyncPool {
-    final_state: Arc&lt;RwLock&lt;<span class="kw">dyn </span>FinalStateController&gt;&gt;,
-    active_history: Arc&lt;RwLock&lt;ActiveHistory&gt;&gt;,
+    <span class="doccomment">/// Async pool max length
+    </span>async_pool_max_length: u64,
     <span class="comment">// current speculative pool changes
     </span>pool_changes: AsyncPoolChanges,
-    <span class="comment">// Used to know which messages we want to take (contains active and final messages)
-    </span>message_infos: BTreeMap&lt;AsyncMessageId, AsyncMessageInfo&gt;,
+    <span class="comment">// Local cache of async messages
+    </span>message_cache: BTreeMap&lt;AsyncMessageId, AsyncMessage&gt;,
 }
 
 <span class="kw">impl </span>SpeculativeAsyncPool {
@@ -347,37 +351,41 @@
         final_state: Arc&lt;RwLock&lt;<span class="kw">dyn </span>FinalStateController&gt;&gt;,
         active_history: Arc&lt;RwLock&lt;ActiveHistory&gt;&gt;,
     ) -&gt; <span class="self">Self </span>{
-        <span class="kw">let </span><span class="kw-2">mut </span>message_infos = final_state
-            .read()
-            .get_async_pool()
-            .message_info_cache
-            .clone();
+        <span class="comment">// fetch final state
+        </span><span class="kw">let </span>async_pool_max_length;
+        <span class="kw">let </span><span class="kw-2">mut </span>message_cache;
+        {
+            <span class="kw">let </span>final_state_lock = final_state.read();
+            <span class="kw">let </span>async_pool = final_state_lock.get_async_pool();
+            async_pool_max_length = async_pool.config.max_length;
+            message_cache = async_pool.message_cache.clone();
+        }
 
-        <span class="kw">for </span>history_item <span class="kw">in </span>active_history.read().<span class="number">0</span>.iter() {
+        <span class="comment">// apply history
+        </span><span class="kw">for </span>history_item <span class="kw">in </span>active_history.read().<span class="number">0</span>.iter() {
             <span class="kw">for </span>change <span class="kw">in </span>history_item.state_changes.async_pool_changes.<span class="number">0</span>.iter() {
                 <span class="kw">match </span>change {
                     (id, SetUpdateOrDelete::Set(message)) =&gt; {
-                        message_infos.insert(<span class="kw-2">*</span>id, AsyncMessageInfo::from(message.clone()));
+                        message_cache.insert(<span class="kw-2">*</span>id, message.clone());
                     }
 
                     (id, SetUpdateOrDelete::Update(message_update)) =&gt; {
-                        message_infos.entry(<span class="kw-2">*</span>id).and_modify(|message_info| {
-                            message_info.apply(message_update.clone());
+                        message_cache.entry(<span class="kw-2">*</span>id).and_modify(|message| {
+                            message.apply(message_update.clone());
                         });
                     }
 
                     (id, SetUpdateOrDelete::Delete) =&gt; {
-                        message_infos.remove(id);
+                        message_cache.remove(id);
                     }
                 }
             }
         }
 
         SpeculativeAsyncPool {
-            final_state,
-            active_history,
+            async_pool_max_length,
             pool_changes: Default::default(),
-            message_infos,
+            message_cache,
         }
     }
 
@@ -390,27 +398,28 @@
     }
 
     <span class="doccomment">/// Takes a snapshot (clone) of the emitted messages
-    </span><span class="kw">pub fn </span>get_snapshot(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (AsyncPoolChanges, BTreeMap&lt;AsyncMessageId, AsyncMessageInfo&gt;) {
-        (<span class="self">self</span>.pool_changes.clone(), <span class="self">self</span>.message_infos.clone())
+    </span><span class="kw">pub fn </span>get_snapshot(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (AsyncPoolChanges, BTreeMap&lt;AsyncMessageId, AsyncMessage&gt;) {
+        (<span class="self">self</span>.pool_changes.clone(), <span class="self">self</span>.message_cache.clone())
     }
 
     <span class="doccomment">/// Resets the `SpeculativeAsyncPool` emitted messages to a snapshot (see `get_snapshot` method)
     </span><span class="kw">pub fn </span>reset_to_snapshot(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        snapshot: (AsyncPoolChanges, BTreeMap&lt;AsyncMessageId, AsyncMessageInfo&gt;),
+        snapshot: (AsyncPoolChanges, BTreeMap&lt;AsyncMessageId, AsyncMessage&gt;),
     ) {
         <span class="self">self</span>.pool_changes = snapshot.<span class="number">0</span>;
-        <span class="self">self</span>.message_infos = snapshot.<span class="number">1</span>;
+        <span class="self">self</span>.message_cache = snapshot.<span class="number">1</span>;
     }
 
     <span class="doccomment">/// Add a new message to the list of changes of this `SpeculativeAsyncPool`
     </span><span class="kw">pub fn </span>push_new_message(<span class="kw-2">&amp;mut </span><span class="self">self</span>, msg: AsyncMessage) {
         <span class="self">self</span>.pool_changes.push_add(msg.compute_id(), msg.clone());
-        <span class="self">self</span>.message_infos.insert(msg.compute_id(), msg.into());
+        <span class="self">self</span>.message_cache.insert(msg.compute_id(), msg);
     }
 
     <span class="doccomment">/// Takes a batch of asynchronous messages to execute,
-    /// removing them from the speculative asynchronous pool and settling their deletion from it in the changes accumulator.
+    /// removing them from the speculative asynchronous pool and settling their deletion from it
+    /// in the changes accumulator.
     ///
     /// # Arguments
     /// * `slot`: slot at which the batch is taken (allows filtering by validity interval)
@@ -426,33 +435,39 @@
     ) -&gt; Vec&lt;(AsyncMessageId, AsyncMessage)&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>available_gas = max_gas;
 
-        <span class="comment">// Choose which messages to take based on self.message_infos
+        <span class="comment">// Choose which messages to take based on the message_cache
         // (all messages are considered: finals, in active_history and in speculative)
 
-        </span><span class="kw">let </span><span class="kw-2">mut </span>wanted_messages = Vec::new();
-
-        <span class="kw">let </span>message_infos = <span class="self">self</span>.message_infos.clone();
-
-        <span class="kw">for </span>(message_id, message_info) <span class="kw">in </span>message_infos.iter() {
-            <span class="kw">let </span>corrected_max_gas = message_info.max_gas.saturating_add(async_msg_cst_gas_cost);
-            <span class="kw">if </span>available_gas &gt;= corrected_max_gas
-                &amp;&amp; slot &gt;= message_info.validity_start
-                &amp;&amp; slot &lt; message_info.validity_end
-                &amp;&amp; message_info.can_be_executed
+        </span><span class="kw">let </span><span class="kw-2">mut </span>wanted_ids = Vec::new();
+        <span class="kw">for </span>(message_id, message) <span class="kw">in </span><span class="self">self</span>.message_cache.iter() {
+            <span class="kw">let </span>corrected_max_gas = message.max_gas.saturating_add(async_msg_cst_gas_cost);
+            <span class="comment">// Note: SecureShareOperation.get_validity_range(...) returns RangeInclusive
+            //       so to be consistent here, use &gt;= &amp; &lt;= checks
+            </span><span class="kw">if </span>available_gas &gt;= corrected_max_gas
+                &amp;&amp; <span class="self">Self</span>::is_message_ready_to_execute(
+                    <span class="kw-2">&amp;</span>slot,
+                    <span class="kw-2">&amp;</span>message.validity_start,
+                    <span class="kw-2">&amp;</span>message.validity_end,
+                )
+                &amp;&amp; message.can_be_executed
             {
                 available_gas -= corrected_max_gas;
 
-                wanted_messages.push(message_id);
+                wanted_ids.push(<span class="kw-2">*</span>message_id);
             }
         }
 
-        <span class="kw">let </span>taken = <span class="self">self</span>.fetch_msgs(wanted_messages, <span class="bool-val">true</span>);
-
-        <span class="kw">for </span>(message_id, <span class="kw">_</span>) <span class="kw">in </span>taken.iter() {
-            <span class="self">self</span>.message_infos.remove(message_id);
+        <span class="comment">// Remove the messages_info of the taken messages, and push their deletion in the pool changes
+        </span><span class="kw">let </span><span class="kw-2">mut </span>taken_msgs = Vec::with_capacity(wanted_ids.len());
+        <span class="kw">for </span>msg_id <span class="kw">in </span><span class="kw-2">&amp;</span>wanted_ids {
+            taken_msgs.push((
+                <span class="kw-2">*</span>msg_id,
+                <span class="self">self</span>.message_cache.remove(msg_id).unwrap(), <span class="comment">// won't panic, items were listed above
+            </span>));
         }
+        <span class="self">self</span>.delete_messages(wanted_ids);
 
-        taken
+        taken_msgs
     }
 
     <span class="doccomment">/// Settle a slot.
@@ -469,159 +484,158 @@
         slot: <span class="kw-2">&amp;</span>Slot,
         ledger_changes: <span class="kw-2">&amp;</span>LedgerChanges,
     ) -&gt; Vec&lt;(AsyncMessageId, AsyncMessage)&gt; {
-        <span class="comment">// Update the messages_info: remove messages that should be removed
+        <span class="comment">// Update eliminated_msgs: remove messages that should be removed
         // Filter out all messages for which the validity end is expired.
-        // Note that the validity_end bound is NOT included in the validity interval of the message.
+        // Note: that the validity_end bound is included in the validity interval of the message.
 
-        </span><span class="kw">let </span><span class="kw-2">mut </span>eliminated_infos = Vec::new();
-        <span class="self">self</span>.message_infos.retain(|id, info| {
-            <span class="kw">if </span><span class="kw-2">*</span>slot &lt; info.validity_end {
-                <span class="bool-val">true
-            </span>} <span class="kw">else </span>{
-                eliminated_infos.push((<span class="kw-2">*</span>id, info.clone()));
+        </span><span class="kw">let </span><span class="kw-2">mut </span>eliminated_msgs = Vec::new();
+
+        <span class="self">self</span>.message_cache.retain(|id, msg| {
+            <span class="kw">if </span><span class="self">Self</span>::is_message_expired(slot, <span class="kw-2">&amp;</span>msg.validity_end) {
+                eliminated_msgs.push((<span class="kw-2">*</span>id, msg.clone()));
                 <span class="bool-val">false
+            </span>} <span class="kw">else </span>{
+                <span class="bool-val">true
             </span>}
         });
 
         <span class="kw">let </span><span class="kw-2">mut </span>eliminated_new_messages = Vec::new();
         <span class="self">self</span>.pool_changes.<span class="number">0</span>.retain(|k, v| <span class="kw">match </span>v {
             SetUpdateOrDelete::Set(message) =&gt; {
-                <span class="kw">if </span><span class="kw-2">*</span>slot &lt; message.validity_end {
-                    <span class="bool-val">true
-                </span>} <span class="kw">else </span>{
+                <span class="kw">if </span><span class="self">Self</span>::is_message_expired(slot, <span class="kw-2">&amp;</span>message.validity_end) {
                     eliminated_new_messages.push((<span class="kw-2">*</span>k, v.clone()));
                     <span class="bool-val">false
+                </span>} <span class="kw">else </span>{
+                    <span class="bool-val">true
                 </span>}
             }
             SetUpdateOrDelete::Update(_v) =&gt; <span class="bool-val">true</span>,
             SetUpdateOrDelete::Delete =&gt; <span class="bool-val">true</span>,
         });
 
-        eliminated_infos.extend(eliminated_new_messages.iter().filter_map(|(k, v)| <span class="kw">match </span>v {
-            SetUpdateOrDelete::Set(v) =&gt; <span class="prelude-val">Some</span>((<span class="kw-2">*</span>k, AsyncMessageInfo::from(v.clone()))),
+        eliminated_msgs.extend(eliminated_new_messages.iter().filter_map(|(k, v)| <span class="kw">match </span>v {
+            SetUpdateOrDelete::Set(v) =&gt; <span class="prelude-val">Some</span>((<span class="kw-2">*</span>k, v.clone())),
             SetUpdateOrDelete::Update(_v) =&gt; <span class="prelude-val">None</span>,
             SetUpdateOrDelete::Delete =&gt; <span class="prelude-val">None</span>,
         }));
 
-        <span class="comment">// Truncate message pool to its max size, removing non-prioritary items
+        <span class="comment">// Truncate message pool to its max size, removing non-priority items
         </span><span class="kw">let </span>excess_count = <span class="self">self
-            </span>.message_infos
+            </span>.message_cache
             .len()
-            .saturating_sub(<span class="self">self</span>.final_state.read().get_async_pool().config.max_length <span class="kw">as </span>usize);
+            .saturating_sub(<span class="self">self</span>.async_pool_max_length <span class="kw">as </span>usize);
 
-        eliminated_infos.reserve_exact(excess_count);
+        eliminated_msgs.reserve_exact(excess_count);
         <span class="kw">for _ in </span><span class="number">0</span>..excess_count {
-            eliminated_infos.push(<span class="self">self</span>.message_infos.pop_last().unwrap()); <span class="comment">// will not panic (checked at excess_count computation)
+            eliminated_msgs.push(<span class="self">self</span>.message_cache.pop_last().unwrap()); <span class="comment">// will not panic (checked at excess_count computation)
         </span>}
 
         <span class="comment">// Activate the messages that can be activated (triggered)
-        </span><span class="kw">let </span><span class="kw-2">mut </span>triggered_info = Vec::new();
-        <span class="kw">for </span>(id, message_info) <span class="kw">in </span><span class="self">self</span>.message_infos.iter_mut() {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(filter) = <span class="kw-2">&amp;</span>message_info.trigger {
+        </span><span class="kw">for </span>(id, msg) <span class="kw">in </span><span class="self">self</span>.message_cache.iter_mut() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(filter) = <span class="kw-2">&amp;</span>msg.trigger {
                 <span class="kw">if </span>is_triggered(filter, ledger_changes) {
-                    message_info.can_be_executed = <span class="bool-val">true</span>;
-                    triggered_info.push((<span class="kw-2">*</span>id, message_info.clone()));
+                    msg.can_be_executed = <span class="bool-val">true</span>;
+                    <span class="self">self</span>.pool_changes.push_activate(<span class="kw-2">*</span>id);
                 }
             }
         }
 
-        <span class="comment">// Query triggered messages
-        </span><span class="kw">let </span>triggered_msg =
-            <span class="self">self</span>.fetch_msgs(triggered_info.iter().map(|(id, <span class="kw">_</span>)| id).collect(), <span class="bool-val">false</span>);
+        <span class="comment">// Push message deletion to the pool changes
+        </span><span class="self">self</span>.delete_messages(eliminated_msgs.iter().map(|(id, <span class="kw">_</span>)| <span class="kw-2">*</span>id).collect());
 
-        <span class="kw">for </span>(msg_id, _msg) <span class="kw">in </span>triggered_msg.iter() {
-            <span class="self">self</span>.pool_changes.push_activate(<span class="kw-2">*</span>msg_id);
-        }
+        <span class="comment">// reintroduce newly eliminated messages
+        </span>eliminated_msgs.extend(eliminated_new_messages.iter().filter_map(|(k, v)| <span class="kw">match </span>v {
+            SetUpdateOrDelete::Set(v) =&gt; <span class="prelude-val">Some</span>((<span class="kw-2">*</span>k, v.clone())),
+            SetUpdateOrDelete::Update(_v) =&gt; <span class="prelude-val">None</span>,
+            SetUpdateOrDelete::Delete =&gt; <span class="prelude-val">None</span>,
+        }));
 
-        <span class="comment">// Query eliminated messages
-        </span><span class="kw">let </span>eliminated_msg =
-            <span class="self">self</span>.fetch_msgs(eliminated_infos.iter().map(|(id, <span class="kw">_</span>)| id).collect(), <span class="bool-val">true</span>);
-
-        eliminated_msg
+        eliminated_msgs
     }
 
-    <span class="kw">fn </span>fetch_msgs(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        <span class="kw-2">mut </span>wanted_ids: Vec&lt;<span class="kw-2">&amp;</span>AsyncMessageId&gt;,
-        delete_existing: bool,
-    ) -&gt; Vec&lt;(AsyncMessageId, AsyncMessage)&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>msgs = Vec::new();
-
-        <span class="kw">let </span><span class="kw-2">mut </span>current_changes = HashMap::new();
-        <span class="kw">for </span>id <span class="kw">in </span>wanted_ids.iter() {
-            current_changes.insert(<span class="kw-2">*</span>id, AsyncMessageUpdate::default());
+    <span class="kw">fn </span>delete_messages(<span class="kw-2">&amp;mut </span><span class="self">self</span>, message_ids: Vec&lt;AsyncMessageId&gt;) {
+        <span class="kw">for </span>message_id <span class="kw">in </span>message_ids {
+            <span class="self">self</span>.pool_changes.push_delete(message_id);
         }
+    }
 
-        <span class="kw">let </span>pool_changes_clone = <span class="self">self</span>.pool_changes.clone();
+    <span class="doccomment">/// Return true if a message (given its validity end) is expired
+    /// Must be consistent with is_message_valid
+    </span><span class="kw">fn </span>is_message_expired(slot: <span class="kw-2">&amp;</span>Slot, message_validity_end: <span class="kw-2">&amp;</span>Slot) -&gt; bool {
+        <span class="comment">// Note: SecureShareOperation.get_validity_range(...) returns RangeInclusive
+        //       (for operation validity) so apply the same rule for message validity
+        </span><span class="kw-2">*</span>slot &gt; <span class="kw-2">*</span>message_validity_end
+    }
 
-        <span class="comment">// First, look in speculative pool
-        </span>wanted_ids.retain(|<span class="kw-2">&amp;</span>message_id| <span class="kw">match </span>pool_changes_clone.<span class="number">0</span>.get(message_id) {
-            <span class="prelude-val">Some</span>(SetUpdateOrDelete::Set(msg)) =&gt; {
-                <span class="kw">if </span>delete_existing {
-                    <span class="self">self</span>.pool_changes.push_delete(<span class="kw-2">*</span>message_id);
-                }
-                msgs.push((<span class="kw-2">*</span>message_id, msg.clone()));
-                <span class="bool-val">false
-            </span>}
-            <span class="prelude-val">Some</span>(SetUpdateOrDelete::Update(msg_update)) =&gt; {
-                current_changes.entry(message_id).and_modify(|e| {
-                    e.apply(msg_update.clone());
-                });
-                <span class="bool-val">true
-            </span>}
-            <span class="prelude-val">Some</span>(SetUpdateOrDelete::Delete) =&gt; <span class="bool-val">true</span>,
-            <span class="prelude-val">None </span>=&gt; <span class="bool-val">true</span>,
-        });
-
-        <span class="comment">// Then, search the active history
-        </span>wanted_ids.retain(|<span class="kw-2">&amp;</span>message_id| {
-            <span class="kw">match </span><span class="self">self</span>.active_history.read().fetch_message(
-                message_id,
-                current_changes.get(message_id).cloned().unwrap_or_default(),
-            ) {
-                Present(SetUpdateOrDelete::Set(<span class="kw-2">mut </span>msg)) =&gt; {
-                    msg.apply(current_changes.get(message_id).cloned().unwrap_or_default());
-                    <span class="kw">if </span>delete_existing {
-                        <span class="self">self</span>.pool_changes.push_delete(<span class="kw-2">*</span>message_id);
-                    }
-                    msgs.push((<span class="kw-2">*</span>message_id, msg));
-                    <span class="kw">return </span><span class="bool-val">false</span>;
-                }
-                Present(SetUpdateOrDelete::Update(msg_update)) =&gt; {
-                    current_changes.entry(message_id).and_modify(|e| {
-                        e.apply(msg_update.clone());
-                    });
-                    <span class="kw">return </span><span class="bool-val">true</span>;
-                }
-                <span class="kw">_ </span>=&gt; {}
-            }
-            <span class="bool-val">true
-        </span>});
-
-        <span class="comment">// Then, fetch all the remaining messages from the final state
-        </span><span class="kw">let </span>fetched_msgs = <span class="self">self
-            </span>.final_state
-            .read()
-            .get_async_pool()
-            .fetch_messages(wanted_ids);
-
-        <span class="kw">for </span>(message_id, message) <span class="kw">in </span>fetched_msgs {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(msg) = message {
-                <span class="kw">let </span><span class="kw-2">mut </span>msg = msg.clone();
-                msg.apply(current_changes.get(message_id).cloned().unwrap_or_default());
-                <span class="kw">if </span>delete_existing {
-                    <span class="self">self</span>.pool_changes.push_delete(<span class="kw-2">*</span>message_id);
-                }
-                msgs.push((<span class="kw-2">*</span>message_id, msg));
-            }
-        }
-
-        msgs
+    <span class="doccomment">/// Return true if a message (given its validity_start &amp; validity end) is ready to execute
+    /// Must be consistent with is_message_expired
+    </span><span class="kw">fn </span>is_message_ready_to_execute(
+        slot: <span class="kw-2">&amp;</span>Slot,
+        message_validity_start: <span class="kw-2">&amp;</span>Slot,
+        message_validity_end: <span class="kw-2">&amp;</span>Slot,
+    ) -&gt; bool {
+        <span class="comment">// Note: SecureShareOperation.get_validity_range(...) returns RangeInclusive
+        //       (for operation validity) so apply the same rule for message validity
+        </span>slot &gt;= message_validity_start &amp;&amp; slot &lt;= message_validity_end
     }
 }
 
 <span class="doccomment">/// Check in the ledger changes if a message trigger has been triggered
 </span><span class="kw">fn </span>is_triggered(filter: <span class="kw-2">&amp;</span>AsyncMessageTrigger, ledger_changes: <span class="kw-2">&amp;</span>LedgerChanges) -&gt; bool {
     ledger_changes.has_writes(<span class="kw-2">&amp;</span>filter.address, filter.datastore_key.clone())
+}
+
+<span class="attr">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+
+    <span class="comment">// Test if is_message_expired &amp; is_message_ready_to_execute are consistent
+    </span><span class="attr">#[test]
+    </span><span class="kw">fn </span>test_validity() {
+        <span class="kw">let </span>slot1 = Slot::new(<span class="number">6</span>, <span class="number">0</span>);
+        <span class="kw">let </span>slot2 = Slot::new(<span class="number">9</span>, <span class="number">0</span>);
+        <span class="kw">let </span>slot_validity_start = Slot::new(<span class="number">4</span>, <span class="number">0</span>);
+        <span class="kw">let </span>slot_validity_end = Slot::new(<span class="number">8</span>, <span class="number">0</span>);
+
+        <span class="macro">assert!</span>(!SpeculativeAsyncPool::is_message_expired(
+            <span class="kw-2">&amp;</span>slot1,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+        <span class="macro">assert!</span>(SpeculativeAsyncPool::is_message_ready_to_execute(
+            <span class="kw-2">&amp;</span>slot1,
+            <span class="kw-2">&amp;</span>slot_validity_start,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+
+        <span class="macro">assert!</span>(!SpeculativeAsyncPool::is_message_expired(
+            <span class="kw-2">&amp;</span>slot_validity_start,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+        <span class="macro">assert!</span>(SpeculativeAsyncPool::is_message_ready_to_execute(
+            <span class="kw-2">&amp;</span>slot_validity_start,
+            <span class="kw-2">&amp;</span>slot_validity_start,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+
+        <span class="macro">assert!</span>(!SpeculativeAsyncPool::is_message_expired(
+            <span class="kw-2">&amp;</span>slot_validity_end,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+        <span class="macro">assert!</span>(SpeculativeAsyncPool::is_message_ready_to_execute(
+            <span class="kw-2">&amp;</span>slot_validity_end,
+            <span class="kw-2">&amp;</span>slot_validity_start,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+
+        <span class="macro">assert!</span>(SpeculativeAsyncPool::is_message_expired(
+            <span class="kw-2">&amp;</span>slot2,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+        <span class="macro">assert!</span>(!SpeculativeAsyncPool::is_message_ready_to_execute(
+            <span class="kw-2">&amp;</span>slot2,
+            <span class="kw-2">&amp;</span>slot_validity_start,
+            <span class="kw-2">&amp;</span>slot_validity_end,
+        ));
+    }
 }
 </code></pre></div></section></main></body></html>
