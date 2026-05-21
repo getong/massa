@@ -290,8 +290,7 @@
     DeferredRegistryGasChange,
 };
 <span class="kw">use </span>massa_models::types::{
-    SetOrDelete, SetOrDeleteDeserializer, SetOrDeleteSerializer, SetOrKeepDeserializer,
-    SetOrKeepSerializer,
+    SetOrDeleteDeserializer, SetOrDeleteSerializer, SetOrKeepDeserializer, SetOrKeepSerializer,
 };
 <span class="kw">use </span>massa_models::{
     amount::{Amount, AmountDeserializer, AmountSerializer},
@@ -337,11 +336,12 @@
         <span class="self">self</span>.calls.insert(id, DeferredRegistryCallChange::Set(call));
     }
 
-    <span class="kw">pub fn </span>get_call(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>DeferredCallId) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DeferredCall&gt; {
-        <span class="kw">match </span><span class="self">self</span>.calls.get(id) {
-            <span class="prelude-val">Some</span>(SetOrDelete::Set(call)) =&gt; <span class="prelude-val">Some</span>(call),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-        }
+    <span class="doccomment">/// Returns the raw change entry for `id` so that callers can distinguish
+    /// `Set` (present), `Delete` (tombstoned), and `None` (no change recorded
+    /// in this layer). Required to stop speculative lookup cascades when a
+    /// deferred call has been deleted in a newer layer.
+    </span><span class="kw">pub fn </span>get_call_change(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>DeferredCallId) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DeferredRegistryCallChange&gt; {
+        <span class="self">self</span>.calls.get(id)
     }
 
     <span class="kw">pub fn </span>set_effective_slot_gas(<span class="kw-2">&amp;mut </span><span class="self">self</span>, gas: u64) {
